@@ -1,0 +1,62 @@
+name: linux-backend-knobs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-both-off:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: optional-codegen-backends
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ninja-build python3-dev python3-venv libz-dev
+          python3 -m venv .venv
+          .venv/bin/pip install -q cmake nanobind setuptools wheel
+      - name: Build wheel without in-tree backends (strict ELF link)
+        run: |
+          PATH="$PWD/.venv/bin:$PATH" \
+          MAX_JOBS=4 TRITON_PARALLEL_LINK_JOBS=2 \
+          TRITON_BUILD_NVIDIA_BACKEND=0 TRITON_BUILD_AMD_BACKEND=0 TRITON_BUILD_PROTON=OFF \
+          .venv/bin/pip wheel --no-build-isolation --no-deps -w dist .
+      - name: Import check
+        run: |
+          .venv/bin/pip install -q --no-deps dist/triton-*.whl
+          .venv/bin/python -c "
+          import triton, triton.backends
+          print('linux backends:', list(triton.backends.backends.keys()))
+          assert list(triton.backends.backends.keys()) == [], 'expected no in-tree backends'
+          print('LINUX BOTH-OFF OK')"
+      - name: libtriton size
+        run: ls -la dist/*.whl && du -h dist/*.whl
+
+  build-default:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: optional-codegen-backends
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ninja-build python3-dev python3-venv libz-dev
+          python3 -m venv .venv
+          .venv/bin/pip install -q cmake nanobind setuptools wheel
+      - name: Build wheel with default (both backends on)
+        run: |
+          PATH="$PWD/.venv/bin:$PATH" \
+          MAX_JOBS=4 TRITON_PARALLEL_LINK_JOBS=2 \
+          .venv/bin/pip wheel --no-build-isolation --no-deps -w dist .
+      - name: Import check
+        run: |
+          .venv/bin/pip install -q --no-deps dist/triton-*.whl
+          .venv/bin/python -c "
+          import triton, triton.backends
+          print('linux backends:', list(triton.backends.backends.keys()))
+          assert list(triton.backends.backends.keys()) == ['amd', 'nvidia']
+          print('LINUX DEFAULT OK')"
